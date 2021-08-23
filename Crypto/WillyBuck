@@ -1,0 +1,359 @@
+#Will Butler, wgb6dwp
+
+import binascii #encode from byte array to string
+import datetime
+import hashlib
+import rsa        #__.encode('ascii') on string to encode message as ascii
+from datetime import datetime
+import random
+import os.path #for balance function (discovered through https://www.guru99.com/python-check-if-file-exists.html#1)
+from os import path
+import sys #for command line args
+
+def sha256sum(filename):        #function retrieved from https://stackoverflow.com/questions/22058048/hashing-a-file-in-python/44873382#44873382
+    h  = hashlib.sha256()
+    b  = bytearray(128*1024)
+    mv = memoryview(b)
+    with open(filename, 'rb', buffering=0) as f:
+        for n in iter(lambda : f.readinto(mv), 0):
+            h.update(mv[:n])
+    return h.hexdigest()
+
+# given an array of bytes, return a hex reprenstation of it
+def bytesToString(data):
+    return binascii.hexlify(data)
+
+# given a hex reprensetation, convert it to an array of bytes
+def stringToBytes(hexstr):
+    return binascii.a2b_hex(hexstr)
+
+# Load the wallet keys from a filename
+def loadWallet(filename):
+    with open(filename, mode='rb') as file:
+        keydata = file.read()
+    privkey = rsa.PrivateKey.load_pkcs1(keydata)
+    pubkey = rsa.PublicKey.load_pkcs1(keydata)
+    return pubkey, privkey
+
+# save the wallet to a file
+def saveWallet(pubkey, privkey, filename):
+    # Save the keys to a key format (outputs bytes)
+    pubkeyBytes = pubkey.save_pkcs1(format='PEM')
+    privkeyBytes = privkey.save_pkcs1(format='PEM')
+    # Convert those bytes to strings to write to a file (gibberish, but a string...)
+    pubkeyString = pubkeyBytes.decode('ascii')
+    privkeyString = privkeyBytes.decode('ascii')
+    # Write both keys to the wallet file
+    with open(filename, 'w') as file:
+        file.write(pubkeyString)
+        file.write(privkeyString)
+    return
+
+#######################################
+#My Function Implementation:
+#######################################
+
+def genesis():  #filename will always be block_0.txt
+    with open("block_0.txt", 'w') as file:
+        file.write("What happened immediately after the Big Bang?")
+    file.close()
+    if path.exists("block_0.txt"):
+        print("Genesis block created in 'block_0.txt")
+    else:
+        print("Failure to create genesis")
+    return
+#genesis()
+
+def generate(walFile):
+    #make pub/priv key
+    (pub, pri) = rsa.newkeys(1024)
+    saveWallet(pub, pri, walFile)
+    if path.exists(walFile):
+        print("New wallet generated in " + walFile)
+    else:
+        print("Failed wallet creation")
+    return
+
+#generate("Keys")
+
+def address(walFile):
+    #separate and obtain public key
+    pub = ""
+    file = open(walFile, 'r')
+    file.readline() #read first line so lines list below doesn't include it
+    lines = file.readlines()
+    for line in lines:
+        if line[0] == "-":
+            break
+        pub += line[0:-1]   #splice out the \n character
+    file.close()
+
+    #put key into new file so hash function will work on it
+    with open("Temp", 'w') as file:
+        file.write(pub)
+    hash = sha256sum("Temp")
+    addy = hash[0 : 16]
+    file.close()
+    # if addy:
+    #     print(walFile + " wallet signauture: " + addy)
+    print(addy)
+    # else:
+    #     print("Failed to create wallet signature/address")
+
+    return addy
+
+def fund(dest, amt, tran):
+    ID = "WillyB"
+    date = str(datetime.now())
+    with open(tran, 'w') as file:
+        file.write("From: " + ID + "\n")
+        file.write("To: " + dest + "\n")
+        file.write("Amount: " + str(float(amt)) + "\n")
+        file.write("Date: " + date)
+    file.close()
+
+    # if path.exists(tran):
+    #     print("Funded wallet " + dest + " with " + str(float(amt)) + " WillyBucks on " + date)
+    # else:
+    #     print("Failed funding")
+
+    return
+
+
+# fund(address("Success!"), 69, "Fund")
+def transfer(source, dest, amt, tran):
+
+    S = address(source)
+    date = str(datetime.now())
+    with open(tran, 'w') as file:
+        file.write("From: " + S + "\n")
+        file.write("To: " + dest + "\n")
+        file.write("Amount: " + str(float(amt)) + "\n")
+        file.write("Date: " + date + "\n\n")
+    file.close()
+
+    #make 4 lines above into message to be signed
+    lines = open(tran, 'r').readlines()
+    m = ""
+    for line in lines:
+        m += line[0:-1]
+    file.close()
+    message = m.encode('ascii')
+    pub, pri = loadWallet(source)
+    sign = rsa.sign(message, pri, 'SHA-256')
+   # print(bytesToString(sign))
+
+    #use source filename to find private key
+    sig = bytesToString(sign).decode('utf-8')
+    with open(tran, 'a') as file:
+        file.write(sig)
+    file.close()
+
+    if path.exists(tran):
+         print("Transferred " + str(float(amt)) + " from " + source + " to " + dest + " and the statement to " + tran + " on " + date)
+    # else:
+    #     print("Failed transfer")
+    return
+# transfer("Success!", "nv982n4lsno", 12.3, "Statement")
+
+
+def balance(walletAddy):
+    balance = 0
+    for i in range(1, 100): #iterate through all blocks, assuming maximum of 100
+        block = "block_" + str(i) + ".txt"
+        if path.exists(block):
+            file = open(block, 'r')
+            lines = file.readlines()
+            for line in lines:
+                if walletAddy in line:
+                    #isolate value being transferred by words around it (transferred and to)
+                    valStartingIndex = line.find('transferred') + 12
+                    valEndingIndex = line.find('to')
+                    val = float(line[valStartingIndex:valEndingIndex])
+                    if line[0] == walletAddy[0]: #trasnferring out
+                        balance += val
+                        #print("Transferred OUT: (block", i, ")", "val", val, "bal", balance)
+                    else:                     #transferring in
+                        #print("Transferring IN! (block)")
+                        balance -= val
+            file.close()
+        else: #no more blocks! End for loop
+            break
+
+    #Check through ledger
+    if not path.exists("ledger.txt"):
+        open("ledger.txt", 'w')
+
+    file = open("ledger.txt", 'r')
+    lines = file.readlines()
+    for line in lines:
+        if walletAddy in line:
+            # isolate value being transferred by words around it (transferred and to)
+            valStartingIndex = line.find('transferred') + 12
+            valEndingIndex = line.find('to')
+            val = float(line[valStartingIndex:valEndingIndex])
+            if line[0] == walletAddy[0]:  # trasnferring out
+                balance -= val
+                #print("Transferred OUT (ledger): ", "val", val, "bal", balance)
+            else:  # transferring in
+                #print("Transferring IN! (ledger)")
+                balance += val
+    file.close()
+    print("The balance for wallet " + str(walletAddy) + " is: " + str(balance))
+
+    return balance
+
+def verify(walletFilename, tranFilename):
+
+    tranFile = open(tranFilename, 'r')
+    lines = tranFile.readlines()
+    #Create transaction record (S transferred x to D on w)
+    S = lines[0][6:-1]
+    D = lines[1][4:-1]
+    x = lines[2][8:-1]
+    w = str(datetime.now())
+    tranRecord = S + " transferred " + x + " to " + D + " on " + w + "\n"
+
+    #Make sure it isn't funding transaction, if so, then automatically verify
+    if "WillyB" in lines[0]: #if the 'From' field has the special case ID for funding, verify
+        ledger = open("ledger.txt", 'a')
+        ledger.write(tranRecord)
+        ledger.close()
+        print("Any funding request (i.e., from WillyB) is considered valid; written to the ledger")
+        return
+
+    #Check availability of funds
+        # isolate amount trying to transfer
+    amt = float(x)
+    tranFile.close()
+        #isolate amount currently in wallet
+    addy = address(walletFilename)
+        #compare values
+    if balance(addy) < amt:
+        print("Failed! The transaction in file " + tranFilename + " with wallet " + walletFilename + " isn't valid")
+        return
+
+
+    #Check signature
+    lines = open(tranFilename, 'r').readlines()
+    m = ""
+    for line in lines[0:-1]:
+        m += line[0:-1]
+    message = m.encode('ascii')
+    pub, pri = loadWallet(walletFilename)
+    sig = lines[-1].encode('ascii')
+    #print(sig)
+    sign = rsa.sign(message, pri, 'SHA-256')
+    #print(bytesToString(sign))
+    if sig == bytesToString(sign):
+        ledger = open("ledger.txt", 'a')
+        ledger.write(tranRecord)
+        ledger.close()
+        print("The transaction in file " + tranFilename + " with wallet " + walletFilename + " is valid, and was written to the ledger")
+    else:
+        print("Transaction signature doesn't match")
+    return
+
+#print(verify("Success!", "Statement"))
+
+def mine(difficulty):
+  #  while nonce hash > target: sha256sum(file); nonce = random.randint(0, 2147483647))
+    for i in range(1, 100):  # iterate through all blocks, assuming maximum of 100
+       block = "block_" + str(i) + ".txt"
+       if path.exists(block):
+           continue
+       else: #stop for loop, we found our block number
+         prevBlockNum = i - 1
+         break
+
+    file = open(block, 'w')
+
+    #generate hash of previous block
+    prevBlock = "block_" + str(prevBlockNum) + ".txt"
+    prevBlockHash = sha256sum(prevBlock)
+    file.write(prevBlockHash + "\n\n")
+
+    #transfer ledger to block
+    ledger = open("ledger.txt", 'r')
+    lines = ledger.readlines()
+    for line in lines:
+        file.write(line + "\n")
+    ledger.close()
+    file.close()
+
+    open("ledger.txt", 'w') #empty ledger
+    ledger.close()
+
+    file = open(block, 'r+')
+    baseBlock = file.readlines()    #save base block (everything but nonce)
+
+    nonce = 0
+    file.write("nonce: " + str(nonce))
+    file.close()
+
+    hash = sha256sum(block)
+
+    while hash[0:(int(difficulty))] != '0'* int(difficulty):
+        file = open(block, 'w+')
+        file.writelines(baseBlock)
+        # print(file.readlines())
+        # print(baseBlock)
+        nonce += 1
+        file.close()
+        file = open(block, 'a')
+        file.write("nonce: " + str(nonce))
+        file.close()
+        hash = sha256sum(block)  #create new hash with new nonce and restart loop
+    # if path.exists(block):
+    #     print("Ledger transactions moved to " + block + "and mined with difficulty " + difficulty + " and nonce " + nonce)
+    # else:
+    #     print("Failed mine")
+    return
+#mine(2)
+
+def validate():
+    for i in range(1, 100):  # iterate through all blocks, assuming maximum of 100
+        block = "block_" + str(i) + ".txt"
+        prevBlock = "block_" + str(i-1) + ".txt"
+        if path.exists(block):
+            file = open(block, 'r')
+            prevBlockHash = file.readline()
+            if sha256sum(prevBlock) != prevBlockHash[0:-1]: #eliminate new line characters
+                print("Failed validation! " + block + "'s hash didn't match")
+                return
+            continue
+        else:  # stop for loop, no more blocks
+            print("The entire blockchain is valid")
+            return
+    return
+
+#print(validate())
+
+def main(argv):
+    if argv[1] == "genesis":
+        genesis()
+    if argv[1] == "generate":
+        generate(argv[2])
+
+    if argv[1] == "address":
+        address(argv[2])
+
+    if argv[1] == "fund":
+        fund(argv[2], argv[3], argv[4])
+
+    if argv[1] == "transfer":
+        transfer(argv[2], argv[3], argv[4], argv[5])
+
+    if argv[1] == "balance":
+        balance(argv[2],)
+
+    if argv[1] == "verify":
+        verify(argv[2], argv[3])
+
+    if argv[1] == "mine":
+        mine(argv[2])
+
+    if argv[1] == "validate":
+        validate()
+
+main(sys.argv)
